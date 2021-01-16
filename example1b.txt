@@ -1,0 +1,143 @@
+#------------------------------------------------------------------------#
+# Modified on   :   July 29, 2013 
+# Created on    :   April 1, 2012  
+# AUTHOR        :   Hyokyoung Grace Hong jointly with Xuming He and Lan Wang
+# AFFILIATION   :   Michigan State University
+# EMAIL         :   hhong@stt.msu.edu
+# Simulate Example 1 case (1b) in Hong, Wang, and Hong (2013, Annals of Statistics,
+# QUANTILE-ADAPTIVE MODEL-FREE VARIABLE SCREENING FOR HIGH-DIMENSIONAL HETEROGENEOUS DATA)
+# This program computes the minimum model size(denoted by R), that is, 
+# the smallest number of covariates needed to ensure that all the active
+# variables are selected.
+# The proportion of active variables (denoted by S) can be simply obtained using
+# the threshold [n/log(n)].
+# This program also computes L2-based nonlinear screening and SIRS for comparison.   
+# R: 2.15.1
+#-------------------------------------------------------------------------#
+### load packages
+library(quantreg)
+library(VGAM)
+library(MASS)
+
+#------------------------------------------------------------------------#
+### Compute Quantile Adaptive sure Independence Screening (QaSIS)
+QaSIS<-function(Y,X,tau)
+{
+p=dim(X)[2]
+n=length(Y)
+s<-matrix(0,nrow=p,ncol=1)
+bfit<-matrix(0,nrow=n,ncol=p)
+Y<-Y-quantile(Y,tau) #centered y
+X<-apply(X,2, function(x) (x-mean(x))/sd(x))
+for(j in 1:p){
+x0<-X[,j]
+knots=quantile(x0,c(1/3,2/3))
+a=bs(x0, knots=knots,degree=1)
+b=rq(Y~a,tau=tau)
+s[j,] <-sum((b$fitted)^2)/n #avg of f^2 for each j
+bfit[,j]<-b$fitted  #pi(x)%*%bhat
+}
+list(rank=(p+1)-rank(s),fit=bfit,w.k=s)
+}
+
+
+### Compute L2-based Nonparametric Independence Screening (NIS)
+NIS<-function(Y,X)
+{
+p=dim(X)[2]
+n=length(Y)
+s<-matrix(0,nrow=p,ncol=1)
+bfit<-matrix(0,nrow=n,ncol=p)
+Y<-Y-mean(Y) #centered y
+X<-apply(X,2,function(x) (x-min(x))/(max(x)-min(x)))
+
+for(j in 1:p){
+x0<-X[,j]
+knots=quantile(x0,c(1/3,2/3))
+a=bs(x0, knots=knots,degree=1)
+b=lm(Y~a)
+s[j,] <-sum((b$fitted)^2)/n #avg of f^2 for each j
+bfit[,j]<-b$fitted  #pi(x)%*%bhat
+}
+list(rank=(p+1)-rank(s),fit=bfit,w.k=s)
+}
+
+
+### Compute Sure Independent Ranking and Screening (SIRS) by Zhu et al. (2011)
+SIRS<-function(X,Y){
+p=dim(X)[2]
+n=length(Y)
+w<-matrix(0, nrow=p, ncol=1)
+X<-apply(X,2, function(x) (x-mean(x))/sd(x))
+
+for(k in 1:p){
+w.k.j<-NULL
+for(j in 1:n){
+s<-(t(X[,k])%*%(1*(Y<Y[j]))/n)^2
+w.k.j<-c(w.k.j,s)
+}
+w[k,]<-(n^3*(mean(w.k.j)))/(n*(n-1)*(n-2))
+}
+list(rank=(p+1)-rank(w))
+}
+
+##--------------------------------------------------
+### define variables
+n=400  #number of data points
+p=1000 #number of variables
+ss=500 # number of repetitions
+gg=4  #number of important variables
+R<-array(0,c(ss,gg,4)) 
+
+g1<-function(x) (x)
+g2<-function(x) ((2*x-1)^2)
+g3<-function(x) (sin(2*pi*x)/(2-sin(2*pi*x)))
+g4<-function(x)(0.1*sin(2*pi*x)+0.2*cos(2*pi*x)+0.3*sin(2*pi*x)^2+0.4*cos(2*pi*x)^3+0.5*sin(2*pi*x)^3)
+
+Sigma1=diag(p) ## covariance matrix
+for (i in 1:p){
+    for (j in 1:p){
+        if (i<j) {
+                Sigma1[i,j]=(0.8)^abs(i-j)
+                Sigma1[j,i]=Sigma1[i,j]
+            }
+            }
+        }
+
+## -----------------------------------------------------------------------
+### Beginning of the iteration
+for( s in 1:ss)
+{
+set.seed(12345+s)
+X=mvrnorm(n,mu=rep(0,p),Sigma=Sigma1)
+set.seed(s+14689)
+e=rnorm(n,0,1) 
+Y=5*g1(X[,1])+3*g2(X[,2])+4*g3(X[,3])+6*g4(X[,4])+sqrt(1.74)*e
+
+
+## i) QaSIS(tau=.5)
+ex1b<-QaSIS(Y=Y,X=X,tau=.5)
+R[s,,1]<-c(ex1b$rank[1],ex1b$rank[2],ex1b$rank[3],ex1b$rank[4])
+
+## ii) QaSIS(tau=.75)
+ex1b<-QaSIS(Y=Y,X=X,tau=.75)
+R[s,,2]<-c(ex1b$rank[1],ex1b$rank[2],ex1b$rank[3],ex1b$rank[4])
+
+## iii) L2-based NIS 
+ex1b<-NIS(Y=Y,X=X)
+R[s,,3]<-c(ex1b$rank[1],ex1b$rank[2],ex1b$rank[3],ex1b$rank[4]) 
+
+## vi) SIRS
+ex1b=SIRS(X=X,Y=Y)
+R[s,,4]<- c(ex1b$rank[1],ex1b$rank[2],ex1b$rank[3],ex1b$rank[4])
+  
+if(s%%20==0) print(s)
+}
+
+### the end ----------------------------------------#
+summary(apply(R[,,1],1,max)) #summary of R for QaSIS(.5)
+summary(apply(R[,,2],1,max)) #summary of R for QaSIS(.75)
+summary(apply(R[,,3],1,max)) #summary of R for NIS
+summary(apply(R[,,4],1,max)) #summary of R for SIRS
+
+
